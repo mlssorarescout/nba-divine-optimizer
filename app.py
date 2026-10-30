@@ -23,6 +23,7 @@ from optimizer import solve_many
 
 TZ = "America/New_York"  # NBA slate days
 MAX_DAYS = 7
+LINEUP_SIZE = 5  # Divination lineup
 
 st.set_page_config(page_title="NBA Divine Optimizer", layout="wide")
 st.title("NBA Divine Optimizer")
@@ -35,6 +36,11 @@ st.markdown("""
 .statrow b { font-size: 1.1rem; }
 .lineup-title, .lineup-totals { text-align: center; font-weight: 700; }
 .lineup-totals { margin-bottom: 0.75rem; }
+[data-testid="stSlider"] { padding: 0.5rem 1.5rem 1.5rem; }
+[data-testid="stSlider"] label p { font-size: 1.15rem; font-weight: 700; }
+[data-testid="stSlider"] div[role="slider"] { width: 1.75rem; height: 1.75rem; }
+[data-testid="stSlider"] [data-baseweb="slider"] > div:first-child { height: 0.6rem; }
+[data-testid="stSlider"] [data-testid="stTickBarMin"], [data-testid="stSlider"] [data-testid="stTickBarMax"] { font-size: 0.95rem; }
 .player-info { text-align: center; font-size: 1.05rem; font-weight: 600; line-height: 1.5;
                opacity: 1; margin-top: 0.4rem; }
 .player-info .pname { font-size: 1.15rem; font-weight: 800; }
@@ -98,21 +104,18 @@ max_end = now_et + pd.Timedelta(days=MAX_DAYS)
 # ---------------------------------------------------------------- settings
 with st.sidebar:
     st.header("2. Lineup settings")
-    start, end = st.slider(
-        "Game window (Eastern)", min_value=now_et.to_pydatetime(), max_value=max_end.to_pydatetime(),
-        value=(now_et.to_pydatetime(), min(default_end, max_end).to_pydatetime()),
-        step=pd.Timedelta(minutes=15).to_pytimedelta(), format="ddd MM/DD h:mm A",
-        help="Games starting inside this window. Default is the rest of today's slate.")
-    multi = st.radio("Player with several games", ["Best game", "Sum of games"], horizontal=True,
-                     help="Best game: count the single highest projection in the window. "
-                          "Sum: add every game in the window.")
-    k = st.number_input("Players in lineup", 1, 15, 5)
     use_cap = st.checkbox("Star cap", value=True)
     cap = st.number_input("Max total Stars", 0.0, 100.0, 16.0, 1.0, disabled=not use_cap,
                           help="Divination: 5 players, 16 Stars max (Stars come from L10).")
     n_lineups = st.number_input("Lineups to build", 1, 10, 1,
                                 help="Each extra lineup excludes cards already used.")
     min_bonus = st.number_input("Min card bonus", 0.5, 3.0, 1.0, 0.01, format="%.2f")
+
+start, end = st.slider(
+    "Game window (Eastern): drag to pick tip-off times", min_value=now_et.to_pydatetime(), max_value=max_end.to_pydatetime(),
+    value=(now_et.to_pydatetime(), min(default_end, max_end).to_pydatetime()),
+    step=pd.Timedelta(minutes=15).to_pytimedelta(), format="ddd MM/DD h:mm A",
+    help="Games starting inside this window. Default is the rest of today's slate.")
 
 window = games[(games["game_et"] >= start) & (games["game_et"] <= end)].dropna(subset=["proj"])
 if window.empty:
@@ -121,9 +124,9 @@ if window.empty:
                + (f" Next game starts {nxt:%a %m/%d %I:%M %p} ET; widen the slider." if pd.notna(nxt) else ""))
     st.stop()
 
-agg = "max" if multi == "Best game" else "sum"
+# A player's value is their best single game in the window.
 per_player = (window.groupby("player_slug")
-                    .agg(proj=("proj", agg), games=("game_id", "nunique"),
+                    .agg(proj=("proj", "max"), games=("game_id", "nunique"),
                          next_game=("game_et", "min"), display_name=("display_name", "first"),
                          stars=("stars", "first"), l10=("l10", "first"))
                     .reset_index())
@@ -147,7 +150,7 @@ with st.sidebar:
 
 # ---------------------------------------------------------------- solve
 lineups, reason = solve_many(
-    pool, int(k), int(n_lineups),
+    pool, LINEUP_SIZE, int(n_lineups),
     cap=float(cap) if use_cap else None,
     locked=set(locked), excluded=set(excluded),
 )
